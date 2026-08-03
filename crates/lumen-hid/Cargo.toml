@@ -1,0 +1,11 @@
+[package]
+name = "lumen-hid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "macOS HID transport for lumen"
+
+[dependencies]
+hidapi = { workspace = true }
+lumen-core = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "lumen-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Device registry, colour types and driver interface for lumen"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }

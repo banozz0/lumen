@@ -1,0 +1,17 @@
+[package]
+name = "lumen-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Control RGB lighting on keyboards and mice from macOS"
+
+[[bin]]
+name = "lumen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+lumen-core = { workspace = true }
+lumen-devices = { workspace = true }
+lumen-hid = { workspace = true }

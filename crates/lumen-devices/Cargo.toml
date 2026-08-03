@@ -1,0 +1,9 @@
+[package]
+name = "lumen-devices"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protocol drivers for the devices lumen supports"
+
+[dependencies]
+lumen-core = { workspace = true }

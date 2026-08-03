@@ -1,0 +1,47 @@
+# The device registry.
+#
+# Adding a device that speaks a protocol lumen already implements needs nothing
+# but a new [[device]] block here -- no Rust. Adding a device with a new protocol
+# needs a driver module in lumen-devices, then a block here naming it.
+#
+# control_report_len is the number of *data* bytes the device's HID feature report
+# declares, excluding the leading report-id byte. Read it off the hardware with
+# `lumen probe` rather than guessing.
+#
+# brightness and power say how the device reaches those two states, so no code
+# anywhere has to match on a device id:
+#   brightness = "native"      the protocol has a brightness command
+#   brightness = "scaled"      it has none; scale the colour instead
+#   power      = "native"      the protocol has an off command
+#   power      = "color-black" it has none; off is black, on is white
+
+[[device]]
+id = "razer-cynosa-lite"
+name = "Razer Cynosa Lite"
+vendor = "Razer"
+kind = "keyboard"
+vendor_id = "0x1532"
+product_id = "0x023F"
+driver = "razer-extended-matrix"
+control_report_len = 90
+# The keyboard latches the colour in hardware; one packet and it stays.
+holds_colour = true
+brightness = "native"
+power = "native"
+
+[[device]]
+id = "hyperx-pulsefire-core"
+name = "HyperX Pulsefire Core"
+vendor = "HyperX"
+kind = "mouse"
+vendor_id = "0x03F0"
+product_id = "0x0D8F"
+driver = "hyperx-pulsefire"
+control_report_len = 263
+# Direct mode is not latched: the firmware reclaims the LED between packets, so
+# the colour only holds while lumen keeps re-sending it (`--hold`).
+holds_colour = false
+# No brightness or power command is known for this protocol, so both are
+# emulated with the direct-colour command.
+brightness = "scaled"
+power = "color-black"
