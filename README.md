@@ -80,6 +80,33 @@ OpenRGB before using lumen.
 
 ## Use
 
+Run it with no arguments and it opens a menu — numbered lists all the way down,
+`0` always steps back one level, and it returns to the menu after every action
+instead of dropping you at the shell:
+
+```
+$ lumen
+
+lumen -- RGB lighting
+
+  1  Set a colour
+  2  Set brightness
+  3  Turn the lighting off
+  4  Turn the lighting on
+  5  Show what is connected
+  6  Inspect the hardware
+  0  Exit
+
+>
+```
+
+Anything lumen can enumerate is a list rather than something to type: devices
+come from what is actually plugged in, colours from the names it accepts. You
+type only where a list cannot carry the answer — a hex value, a percentage.
+
+The menu is a front-end and nothing else: it builds exactly the same calls the
+flags do, so scripts and agents keep the full flag surface.
+
 ```bash
 lumen list                                      # what is supported and plugged in
 lumen set keyboard --color blue                 # by kind
@@ -130,28 +157,33 @@ its own report format, checksum and command set. That is HID being a zoo, not a
 gap in lumen. The good news is that the driver is the only new code — the CLI,
 the registry, brightness, power and `--hold` all come free.
 
+One caveat on the easy case, because "same vendor" is not quite the boundary: a
+driver declares the exact `control_report_len` it builds for, and lumen refuses a
+registry entry that disagrees rather than sending a packet of the wrong size. A
+device from a vendor already here but with a different report length — or a
+different LED id inside the same protocol — needs a change in the driver too. It
+is a smaller change than a new protocol, but it is not zero.
+
 ### 1. Measure the hardware
 
 ```
 $ lumen probe
-03f0:0d8f  HP, Inc HyperX Pulsefire Core  -- in the registry as `hyperx-pulsefire-core`, driver `hyperx-pulsefire`
-  interface 0: no feature reports
-  interface 1: no feature reports
-  interface 2: feature report 0x07, 263 data bytes
 1532:023f  Razer Razer Cynosa Lite  -- in the registry as `razer-cynosa-lite`, driver `razer-extended-matrix`
-  interface 0: no feature reports
-  interface 1: no feature reports
   interface 2: feature report 0x00, 90 data bytes
+03f0:0d8f  HP, Inc HyperX Pulsefire Core  -- in the registry as `hyperx-pulsefire-core`, driver `hyperx-pulsefire`
+  interface 1: feature report 0x07, 263 data bytes
 ```
 
-`probe` reports every attached HID device, in the registry or not. You are
-looking for one big vendor-specific **feature report** — 90 data bytes on the
-Razer, 263 on the HyperX. That byte count is the `control_report_len` your entry
-needs, and reading it off the hardware beats guessing it.
+`probe` reports every attached HID device, in the registry or not, and one line
+per interface — the listing above keeps only the interesting line of each. You
+are looking for a big vendor-specific **feature report**: 90 data bytes on this
+keyboard, 263 on this mouse. That byte count is the `control_report_len` your
+entry needs, and reading it off the hardware beats guessing it.
 
-Interfaces that expose a keyboard never open, whatever is granted. That is macOS
-protecting keystrokes, and it is why lumen finds the control interface by reading
-report descriptors rather than by hardcoding an interface number.
+Interfaces reported as `unreadable` are normal. macOS refuses to hand over one
+that carries keystrokes however the grant is set, which is why lumen finds the
+control interface by reading report descriptors rather than by hardcoding an
+interface number.
 
 ### 2. Write the block
 
@@ -209,9 +241,9 @@ devices/devices.toml   the device registry
 One module per protocol *family*, not per device: several devices can share a
 driver, which is why adding one usually means writing no Rust.
 
-`lumen-core`'s public API is kept plain — owned data, no generics or lifetimes
-escaping — so a SwiftUI front-end can sit on it through a thin FFI wrapper
-instead of a rewrite.
+`lumen-core`'s public API is kept plain — owned data, no generic parameters,
+nothing a caller has to instantiate — so a SwiftUI front-end can sit on it
+through a thin FFI wrapper instead of a rewrite.
 
 Every protocol here is written from published byte-level facts. No code is copied
 from OpenRGB or OpenRazer, which is what lets lumen be MIT rather than inherit

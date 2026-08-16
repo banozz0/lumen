@@ -4,14 +4,14 @@
 //! device expects, which keeps every protocol fully testable without hardware --
 //! `lumen-hid` is the only crate that talks to a device.
 //!
-//! The public surface here is deliberately plain (owned data, no generics or
-//! lifetimes escaping) so a SwiftUI front-end can sit on top of it later through
-//! a thin FFI wrapper rather than a rewrite.
+//! The public surface here is deliberately plain -- owned data, no generic
+//! parameters, nothing a caller has to instantiate -- so a SwiftUI front-end can
+//! sit on top of it later through a thin FFI wrapper rather than a rewrite.
 
 pub mod color;
 pub mod device;
 pub mod driver;
 
-pub use color::{ColorParseError, Rgb};
+pub use color::{ColorParseError, Rgb, named_colors};
 pub use device::{BrightnessMode, DeviceSpec, PowerMode, Registry, RegistryError};
 pub use driver::{Driver, DriverError, Packet};

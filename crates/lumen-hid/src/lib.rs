@@ -36,9 +36,14 @@ pub enum HidError {
         "cannot open {name}: this terminal is not allowed to talk to HID devices.\n\
          macOS charges the Input Monitoring grant to whatever launched the shell, not \
          to the `lumen` binary, so it is your terminal that needs it.\n\
-         System Settings -> Privacy & Security -> Input Monitoring: {fix}"
+         System Settings -> Privacy & Security -> Input Monitoring: {fix}\n\
+         What each interface said:\n  {tried}"
     )]
-    InputMonitoring { name: String, fix: &'static str },
+    InputMonitoring {
+        name: String,
+        fix: &'static str,
+        tried: String,
+    },
     #[error("{name} is not plugged in")]
     NotPresent { name: String },
     #[error(
@@ -91,13 +96,16 @@ pub struct ProbedDevice {
 }
 
 /// The permission error to raise when a device will not open, or `None` when
-/// Input Monitoring is granted and the cause is something else.
-fn permission_error(name: &str) -> Option<HidError> {
+/// Input Monitoring is granted and the cause is something else. `tried` is what
+/// each interface said: the cause leads, but the diagnosis is kept under it,
+/// because a missing grant is only the likeliest reason an open failed.
+fn permission_error(name: &str, tried: &[String]) -> Option<HidError> {
     access::input_monitoring()
         .fix()
         .map(|fix| HidError::InputMonitoring {
             name: name.to_string(),
             fix,
+            tried: tried.join("\n  "),
         })
 }
 
@@ -200,7 +208,7 @@ impl Hid {
         // symptom -- printing the symptom instead is what once made lumen look
         // broken for an hour. When access is granted the list is the real
         // answer: a keyboard collection refuses to open however it is asked.
-        if !opened_any && let Some(e) = permission_error(&spec.name) {
+        if !opened_any && let Some(e) = permission_error(&spec.name, &tried) {
             return Err(e);
         }
 

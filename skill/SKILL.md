@@ -20,6 +20,9 @@ short-lived command:
 lumen set keyboard --color purple
 ```
 
+Run bare, `lumen` opens an interactive menu for the user. That is for them, not
+for you — always call it with a subcommand.
+
 Devices are declared in a registry compiled into the binary, so `lumen list` is
 the truth about what this machine can drive — never assume a device is supported
 because the user owns it.
@@ -90,6 +93,10 @@ session hangs until something kills it.
 
 ## Never run these
 
+- **`lumen` with no arguments.** That opens an interactive menu for a human and
+  blocks reading stdin; a non-interactive call hangs until something kills it.
+  Always give a subcommand. The menu builds the same calls anyway, so nothing is
+  out of reach through the flags.
 - **`lumen set … --hold` in the foreground.** It is an infinite loop by design.
   A device that does not latch its colour needs it, and `lumen list` marks which
   ones those are — but it belongs in a detached call the user can stop.

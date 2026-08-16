@@ -1,5 +1,6 @@
 //! `lumen` -- set RGB lighting on supported keyboards and mice.
 
+mod menu;
 mod usage;
 
 use anyhow::{Context, Result, bail};
@@ -15,8 +16,10 @@ const HOLD_INTERVAL: Duration = Duration::from_millis(30);
 #[derive(Parser)]
 #[command(name = "lumen", version, about = "Control RGB lighting on keyboards and mice")]
 struct Cli {
+    /// No subcommand opens the menu. The flags stay complete and unchanged:
+    /// the menu is a front-end that builds the same calls.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -105,11 +108,24 @@ impl Action {
 fn main() -> Result<()> {
     usage::start();
     let cli = Cli::parse();
-    let logged_as = cli.command.name();
+    let logged_as = cli.command.as_ref().map_or("menu", Command::name);
+    let result = run(cli);
+    usage::log(logged_as, result.is_ok());
+    result
+}
+
+/// Everything after argument parsing, so that a failure to start -- a broken
+/// registry, no HID access at all -- is logged as a command that did not serve
+/// its answer rather than not logged at all.
+fn run(cli: Cli) -> Result<()> {
     let registry = Registry::builtin().context("built-in device registry is broken")?;
     let hid = Hid::new()?;
 
-    let result = match cli.command {
+    let Some(command) = cli.command else {
+        return menu::run(&registry, &hid);
+    };
+
+    match command {
         Command::List => list(&registry, &hid),
         Command::Set {
             target,
@@ -124,9 +140,7 @@ fn main() -> Result<()> {
             set(&registry, &hid, &target, action, dry_run, hold)
         }
         Command::Probe => probe(&registry, &hid),
-    };
-    usage::log(logged_as, result.is_ok());
-    result
+    }
 }
 
 /// Listing devices works without the Input Monitoring grant but setting them
@@ -454,6 +468,26 @@ mod tests {
             Action::Power(true)
         ));
         assert!(Action::from_flags("burgundy", None, false, false).is_err());
+    }
+
+    /// Bare `lumen` is the menu, and adding it must not have cost the flag
+    /// surface anything: agents and scripts keep using the subcommands.
+    #[test]
+    fn a_bare_invocation_opens_the_menu_without_touching_the_flags() {
+        assert!(
+            Cli::try_parse_from(["lumen"]).unwrap().command.is_none(),
+            "bare `lumen` must parse to no subcommand"
+        );
+        assert!(matches!(
+            Cli::try_parse_from(["lumen", "set", "keyboard", "--color", "red"])
+                .unwrap()
+                .command,
+            Some(Command::Set { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["lumen", "list"]).unwrap().command,
+            Some(Command::List)
+        ));
     }
 
     #[test]

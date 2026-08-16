@@ -55,6 +55,13 @@ const NAMED: &[(&str, Rgb)] = &[
     ("purple", Rgb::new(128, 0, 255)),
 ];
 
+/// Every colour name the parser accepts, so a menu can offer the list instead of
+/// expecting the user to know it. `black` and `off` are the same colour under
+/// two names, and both are here: the parser accepts either.
+pub fn named_colors() -> &'static [(&'static str, Rgb)] {
+    NAMED
+}
+
 impl std::str::FromStr for Rgb {
     type Err = ColorParseError;
 

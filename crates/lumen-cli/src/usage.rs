@@ -27,11 +27,23 @@ pub fn start() {
     let _ = START.set(Instant::now());
 }
 
-/// Record a served command. `cmd` is one of lumen's own subcommand names, never
-/// anything the user typed, so the line needs no JSON escaping.
+/// Record a served command, timed from startup.
 pub fn log(cmd: &str, ok: bool) {
-    let Some(path) = log_path() else { return };
     let ms = START.get().map_or(0, |s| s.elapsed().as_millis());
+    write(cmd, ok, ms);
+}
+
+/// Record one action out of a menu session, timed from when that action began
+/// rather than from startup -- a menu run is many commands, and each one's
+/// duration is its own.
+pub fn log_since(cmd: &str, ok: bool, started: Instant) {
+    write(cmd, ok, started.elapsed().as_millis());
+}
+
+/// `cmd` is always one of lumen's own subcommand names, never anything the user
+/// typed, so the line needs no JSON escaping.
+fn write(cmd: &str, ok: bool, ms: u128) {
+    let Some(path) = log_path() else { return };
     let line = line(&timestamp(SystemTime::now()), cmd, ok, ms);
     let _ = OpenOptions::new()
         .create(true)
