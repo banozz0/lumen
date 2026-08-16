@@ -26,7 +26,8 @@ between packets, so a colour lasts only while `--hold` keeps re-sending it every
 because it works well.
 
 Your device is almost certainly not in that table. [Adding your
-own](#adding-your-own-device) is the interesting part.
+own](#adding-your-own-device) is the interesting part, and a PR that adds it is
+the whole point — see [Contributing](#contributing).
 
 ## Install
 
@@ -243,6 +244,38 @@ cargo clippy --all-targets -- -D warnings
 `crates/lumen-devices/src/razer.rs` is the one to copy: its module docs write out
 the wire format the tests then pin, byte by byte.
 
+## Contributing
+
+**This is an open project, and more devices are exactly what it is for.** The
+registry exists so lumen can grow past the two peripherals one person happens to
+own. Every other Razer, every other HyperX, and every vendor nobody has touched
+yet is a gap that somebody holding the hardware can close in an evening — pull
+requests are genuinely wanted, not tolerated.
+
+In rough order of how easy they are to say yes to:
+
+- **A device that speaks a driver already here** — one `[[device]]` block, no
+  Rust. The easiest possible PR.
+- **A new vendor** — a driver module in `crates/lumen-devices` with byte-exact
+  tests, plus its `[[device]]` block. Say where the protocol facts came from.
+- **A fix to a device already listed.** The open one is the Pulsefire Core's
+  latch command: nobody has found it, and finding it would turn the mouse from
+  experimental into supported.
+- **Anything under [Not yet](#what-it-deliberately-does-not-do)** — effects,
+  per-key lighting, Linux. None of it is refused on principle; it is just not
+  written.
+
+Two things every device PR needs, because they are what keeps the table worth
+reading: **the `lumen probe` output your numbers came from**, and **a plain
+sentence about what you saw the hardware actually do**. This README claims every
+listed device was seen working, and that has to keep being true — including
+whether the colour survives on its own, which is the one thing that decides
+whether a device is a promise or an experiment.
+
+Protocol facts here are written from published byte-level documentation. No code
+is copied from OpenRGB or OpenRazer, and PRs need to keep it that way: those are
+GPL, lumen is MIT, and mixing them would quietly relicense the project.
+
 ## How it is put together
 
 ```
@@ -260,9 +293,9 @@ driver, which is why adding one usually means writing no Rust.
 nothing a caller has to instantiate — so a SwiftUI front-end can sit on it
 through a thin FFI wrapper instead of a rewrite.
 
-Every protocol here is written from published byte-level facts. No code is copied
-from OpenRGB or OpenRazer, which is what lets lumen be MIT rather than inherit
-their licences.
+Every protocol here is written from published byte-level facts rather than
+adapted from another project's source — see [Contributing](#contributing) for
+why that matters and has to stay true.
 
 ## Usage log
 
@@ -286,5 +319,7 @@ third device can cost a TOML block and nothing else — true when it speaks a
 protocol already here at the same report length, and honestly documented where
 it is not.
 
-MIT licensed. Solo project — agents wrote the code — and no support is promised:
-issues and PRs may sit unanswered. Fork it freely.
+MIT licensed. A solo project, and agents wrote the code, so no support is
+promised — an issue asking someone to debug your setup may sit for a while.
+Contributions are the opposite: a PR adding a device is the best thing that can
+happen to this repo. Fork it freely.
