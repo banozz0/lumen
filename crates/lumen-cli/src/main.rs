@@ -1,6 +1,7 @@
 //! `lumen` -- set RGB lighting on supported keyboards and mice.
 
 mod menu;
+mod paint;
 mod usage;
 
 use anyhow::{Context, Result, bail};
@@ -175,28 +176,34 @@ fn list(registry: &Registry, hid: &Hid) -> Result<()> {
     Ok(())
 }
 
+/// What one action came to for one device: the packets to send, a plain
+/// description for the line the CLI prints, and the colour that description is
+/// about, when there is one. A brightness command has no colour of its own,
+/// which is exactly the difference `shown` records.
+struct Planned {
+    packets: Vec<Packet>,
+    what: String,
+    shown: Option<Rgb>,
+}
+
 /// Turn one action into packets for one device, following the behaviour its
 /// registry entry declares rather than anything hardcoded about the device.
-/// Returns the packets and a plain description of what they do, for the line
-/// the CLI prints.
-fn plan(
-    driver: &dyn Driver,
-    spec: &DeviceSpec,
-    action: Action,
-) -> Result<(Vec<Packet>, String), DriverError> {
-    Ok(match action {
-        Action::Color(c) => (driver.set_color(spec, c)?, c.to_string()),
+fn plan(driver: &dyn Driver, spec: &DeviceSpec, action: Action) -> Result<Planned, DriverError> {
+    let (packets, what, shown) = match action {
+        Action::Color(c) => (driver.set_color(spec, c)?, c.to_string(), Some(c)),
 
         Action::Brightness { level, base } => match spec.brightness {
             BrightnessMode::Native => (
                 driver.set_brightness(spec, level)?,
                 format!("brightness {level}%"),
+                None,
             ),
             BrightnessMode::Scaled => {
                 let dimmed = base.scaled(level);
                 (
                     driver.set_color(spec, dimmed)?,
                     format!("{dimmed} ({base} at {level}%)"),
+                    Some(dimmed),
                 )
             }
         },
@@ -204,13 +211,18 @@ fn plan(
         Action::Power(on) => {
             let word = if on { "on" } else { "off" };
             match spec.power {
-                PowerMode::Native => (driver.set_power(spec, on)?, word.to_string()),
+                PowerMode::Native => (driver.set_power(spec, on)?, word.to_string(), None),
                 PowerMode::ColorBlack => {
                     let c = if on { Rgb::WHITE } else { Rgb::BLACK };
-                    (driver.set_color(spec, c)?, format!("{word} ({c})"))
+                    (driver.set_color(spec, c)?, format!("{word} ({c})"), Some(c))
                 }
             }
         }
+    };
+    Ok(Planned {
+        packets,
+        what,
+        shown,
     })
 }
 
@@ -242,15 +254,22 @@ fn set(
     for spec in &targets {
         let driver = lumen_devices::driver_for(&spec.driver)
             .with_context(|| format!("device `{}`", spec.id))?;
-        let (packets, what) =
+        let planned =
             plan(driver.as_ref(), spec, action).with_context(|| format!("device `{}`", spec.id))?;
-        work.push((*spec, packets, what));
+        work.push((*spec, planned));
     }
 
+    // A colour is worth showing, not only naming; `swatch` is empty whenever
+    // the output is not a terminal, so a piped line is unchanged.
+    let describe = |p: &Planned| {
+        let swatch = p.shown.map(paint::swatch).unwrap_or_default();
+        format!("{swatch}{}", p.what)
+    };
+
     if dry_run {
-        for (spec, packets, what) in &work {
-            println!("{} -> {what}", spec.name);
-            for p in packets {
+        for (spec, planned) in &work {
+            println!("{} -> {}", spec.name, describe(planned));
+            for p in &planned.packets {
                 println!("  report 0x{:02x}, {} bytes", p.report_id(), p.bytes.len());
                 println!("  {}", p.hex());
             }
@@ -259,14 +278,17 @@ fn set(
     }
 
     let mut connections = Vec::new();
-    for (spec, packets, what) in work {
+    for (spec, planned) in work {
         let conn = hid.open(spec)?;
-        conn.send_all(&packets)?;
+        conn.send_all(&planned.packets)?;
         println!(
-            "{} -> {what} (interface {}, report 0x{:02x})",
-            spec.name, conn.interface, conn.report_id
+            "{} -> {} (interface {}, report 0x{:02x})",
+            spec.name,
+            describe(&planned),
+            conn.interface,
+            conn.report_id
         );
-        connections.push((spec, conn, packets));
+        connections.push((spec, conn, planned.packets));
     }
 
     let volatile: Vec<&str> = connections
@@ -369,7 +391,17 @@ mod tests {
     fn packets(usb: (u16, u16), action: Action) -> (Vec<Packet>, String) {
         let spec = spec(usb);
         let driver = lumen_devices::driver_for(&spec.driver).unwrap();
-        plan(driver.as_ref(), &spec, action).unwrap()
+        let planned = plan(driver.as_ref(), &spec, action).unwrap();
+        (planned.packets, planned.what)
+    }
+
+    /// A colour is offered to the terminal exactly when the action has one to
+    /// show: a native brightness command does not, a scaled one does, because
+    /// there the brightness *is* a dimmed colour.
+    fn shown(usb: (u16, u16), action: Action) -> Option<Rgb> {
+        let spec = spec(usb);
+        let driver = lumen_devices::driver_for(&spec.driver).unwrap();
+        plan(driver.as_ref(), &spec, action).unwrap().shown
     }
 
     const KEYBOARD: (u16, u16) = (0x1532, 0x023F);
@@ -468,6 +500,27 @@ mod tests {
             Action::Power(true)
         ));
         assert!(Action::from_flags("burgundy", None, false, false).is_err());
+    }
+
+    #[test]
+    fn a_colour_is_offered_for_display_only_when_the_action_has_one() {
+        let red = Rgb::new(255, 0, 0);
+        assert_eq!(shown(KEYBOARD, Action::Color(red)), Some(red));
+        // The keyboard has a brightness command, so nothing about the colour
+        // changed and there is nothing to show.
+        assert_eq!(
+            shown(KEYBOARD, Action::Brightness { level: 40, base: red }),
+            None
+        );
+        // The mouse reaches brightness by dimming the colour, so the dimmed
+        // colour is what actually went to the device.
+        assert_eq!(
+            shown(MOUSE, Action::Brightness { level: 40, base: red }),
+            Some(red.scaled(40))
+        );
+        assert_eq!(shown(KEYBOARD, Action::Power(false)), None);
+        assert_eq!(shown(MOUSE, Action::Power(false)), Some(Rgb::BLACK));
+        assert_eq!(shown(MOUSE, Action::Power(true)), Some(Rgb::WHITE));
     }
 
     /// Bare `lumen` is the menu, and adding it must not have cost the flag

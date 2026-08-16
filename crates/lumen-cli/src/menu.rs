@@ -115,7 +115,12 @@ fn pick_color() -> Option<Rgb> {
         .copied()
         .collect();
 
-    let mut labels: Vec<String> = palette.iter().map(|(name, _)| (*name).to_string()).collect();
+    // Show each colour beside its name. A list of eleven words is a lookup; a
+    // list of eleven swatches is a palette.
+    let mut labels: Vec<String> = palette
+        .iter()
+        .map(|(name, rgb)| format!("{}{name}", crate::paint::swatch(*rgb)))
+        .collect();
     labels.push("Type a hex value".to_string());
 
     loop {

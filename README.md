@@ -131,6 +131,11 @@ Colours accept names (`red`, `cyan`, `off`, …), `#rrggbb`, or the short `#f08`
 `--dry-run` and `--hold` work with `--brightness`, `--off` and `--on` exactly as
 they work with `--color`.
 
+In a terminal, colours are shown rather than only named: the menu's palette
+carries a swatch of each colour beside its name, and a result line shows the
+colour that actually went to the device. Piped into anything else — or with
+`NO_COLOR` set — the output is plain text with no escape codes in it.
+
 ### Brightness and on/off
 
 Devices disagree about what their firmware can do, so the registry declares which
