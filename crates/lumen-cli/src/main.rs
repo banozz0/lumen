@@ -1,9 +1,11 @@
 //! `lumen` -- set RGB lighting on supported keyboards and mice.
 
+mod usage;
+
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use lumen_core::{BrightnessMode, DeviceSpec, Driver, DriverError, Packet, PowerMode, Registry, Rgb};
-use lumen_hid::Hid;
+use lumen_hid::{Hid, ProbedDevice, access};
 use std::time::Duration;
 
 /// How often `--hold` re-sends the colour. Devices that do not latch a direct
@@ -58,9 +60,21 @@ enum Command {
         hold: bool,
     },
 
-    /// Dump the feature reports each interface declares. Use this when adding a
-    /// device to the registry to find its `control_report_len`.
+    /// Dump every attached HID device and the feature reports each of its
+    /// interfaces declares, known to lumen or not. This is where a new device's
+    /// `control_report_len` comes from.
     Probe,
+}
+
+impl Command {
+    /// The name this command is logged under.
+    fn name(&self) -> &'static str {
+        match self {
+            Command::List => "list",
+            Command::Set { .. } => "set",
+            Command::Probe => "probe",
+        }
+    }
 }
 
 /// What one `lumen set` run does to every device it targets.
@@ -89,11 +103,13 @@ impl Action {
 }
 
 fn main() -> Result<()> {
+    usage::start();
     let cli = Cli::parse();
+    let logged_as = cli.command.name();
     let registry = Registry::builtin().context("built-in device registry is broken")?;
     let hid = Hid::new()?;
 
-    match cli.command {
+    let result = match cli.command {
         Command::List => list(&registry, &hid),
         Command::Set {
             target,
@@ -108,11 +124,27 @@ fn main() -> Result<()> {
             set(&registry, &hid, &target, action, dry_run, hold)
         }
         Command::Probe => probe(&registry, &hid),
+    };
+    usage::log(logged_as, result.is_ok());
+    result
+}
+
+/// Listing devices works without the Input Monitoring grant but setting them
+/// does not, so a missing grant prints a healthy-looking table where every write
+/// will fail. Say so on stderr, where it cannot spoil a piped table.
+fn warn_if_devices_cannot_be_opened() {
+    if let Some(fix) = access::input_monitoring().fix() {
+        eprintln!(
+            "warning: this terminal is not allowed to open HID devices, so nothing \
+             below can be set.\n         System Settings -> Privacy & Security -> \
+             Input Monitoring: {fix}"
+        );
     }
 }
 
 fn list(registry: &Registry, hid: &Hid) -> Result<()> {
     let present = hid.present(registry.all())?;
+    warn_if_devices_cannot_be_opened();
     println!("{:<24} {:<24} {:<9} STATUS", "ID", "DEVICE", "KIND");
     for spec in registry.all() {
         let here = present.iter().any(|p| p.id == spec.id);
@@ -231,6 +263,9 @@ fn set(
 
     if hold {
         println!("holding colour every {HOLD_INTERVAL:?} -- press Ctrl-C to stop");
+        // The colour is on the device now; what follows is only keeping it
+        // there until Ctrl-C, which never returns to `main` to be logged.
+        usage::log("set", true);
         loop {
             for (_, conn, packets) in &connections {
                 conn.send_all(packets)?;
@@ -247,21 +282,60 @@ fn set(
     Ok(())
 }
 
-fn probe(registry: &Registry, hid: &Hid) -> Result<()> {
-    let present = hid.present(registry.all())?;
-    if present.is_empty() {
-        println!("No supported devices plugged in.");
-        return Ok(());
+/// What a probed device calls itself, or a stand-in when it says nothing.
+fn describe(device: &ProbedDevice) -> String {
+    let name = format!("{} {}", device.manufacturer, device.product);
+    match name.trim() {
+        "" => "unnamed device".to_string(),
+        named => named.to_string(),
     }
-    for spec in present {
-        match hid.open(spec) {
-            Ok(conn) => println!(
-                "{}: control report 0x{:02x} of {} data bytes on interface {}",
-                spec.name, conn.report_id, spec.control_report_len, conn.interface
-            ),
-            Err(e) => println!("{}: {e}", spec.name),
+}
+
+/// Report every attached device and what each interface declares, so a device
+/// lumen has never seen can be added to the registry from measurements instead
+/// of guesses. Devices already in the registry are marked as such -- being able
+/// to compare a known device against the hardware is half of what makes the
+/// unknown one readable.
+fn probe(registry: &Registry, hid: &Hid) -> Result<()> {
+    warn_if_devices_cannot_be_opened();
+    for device in hid.scan()? {
+        let known = match registry.by_usb_id(device.vendor_id, device.product_id) {
+            Some(spec) => format!("in the registry as `{}`, driver `{}`", spec.id, spec.driver),
+            None => "not in the registry".to_string(),
+        };
+        println!(
+            "{:04x}:{:04x}  {}  -- {known}",
+            device.vendor_id,
+            device.product_id,
+            describe(&device)
+        );
+
+        for interface in &device.interfaces {
+            let what = match &interface.error {
+                Some(e) => format!("unreadable ({e})"),
+                None if interface.feature_reports.is_empty() => "no feature reports".to_string(),
+                None => interface
+                    .feature_reports
+                    .iter()
+                    .map(|(id, len)| format!("feature report 0x{id:02x}, {len} data bytes"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            };
+            // hidapi reports -1 for anything with no USB interface number of
+            // its own, a Bluetooth peripheral for instance.
+            match interface.interface {
+                n if n < 0 => println!("  no interface number: {what}"),
+                n => println!("  interface {n}: {what}"),
+            }
         }
     }
+
+    println!(
+        "\nA device's control interface is the one declaring a big vendor feature report \
+         -- 90 data bytes on a Razer, 263 on the HyperX. That byte count is the \
+         `control_report_len` its `[[device]]` block needs. Interfaces exposing a \
+         keyboard never open, whatever is granted; that is macOS, not a fault."
+    );
     Ok(())
 }
 

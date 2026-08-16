@@ -5,7 +5,8 @@
 //! writing no Rust at all.
 //!
 //! Every driver is written from published byte-level protocol facts. No code is
-//! copied from OpenRGB or OpenRazer, which keeps lumen's own licensing open.
+//! copied from OpenRGB or OpenRazer, which is what lets lumen be MIT rather than
+//! inherit their licences.
 
 pub mod hyperx;
 pub mod razer;

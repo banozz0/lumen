@@ -11,10 +11,12 @@
 //!   interface's report descriptor and picking the one that declares the feature
 //!   report the driver expects, rather than by hardcoding interface numbers.
 
+pub mod access;
 pub mod descriptor;
 
 use hidapi::HidApi;
 use lumen_core::{DeviceSpec, Packet};
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub use descriptor::feature_reports;
@@ -25,10 +27,18 @@ pub enum HidError {
     Init(String),
     #[error(
         "no HID devices are visible at all.\n\
-         Grant Input Monitoring to your terminal in System Settings -> Privacy & \
-         Security -> Input Monitoring, then run this again."
+         This is not the Input Monitoring grant -- listing devices works without it. \
+         Either this process was started by launchd, which always sees an empty list, \
+         or another process is holding the devices."
     )]
     NoDevicesVisible,
+    #[error(
+        "cannot open {name}: this terminal is not allowed to talk to HID devices.\n\
+         macOS charges the Input Monitoring grant to whatever launched the shell, not \
+         to the `lumen` binary, so it is your terminal that needs it.\n\
+         System Settings -> Privacy & Security -> Input Monitoring: {fix}"
+    )]
+    InputMonitoring { name: String, fix: &'static str },
     #[error("{name} is not plugged in")]
     NotPresent { name: String },
     #[error(
@@ -58,6 +68,37 @@ pub struct Connection {
     name: String,
     pub interface: i32,
     pub report_id: u8,
+}
+
+/// One USB interface as `lumen probe` found it.
+pub struct ProbedInterface {
+    pub interface: i32,
+    /// Feature reports this interface declares, as `(report id, data bytes)`.
+    /// The data-byte count is what a registry entry's `control_report_len` holds.
+    pub feature_reports: Vec<(u8, u32)>,
+    /// Why the interface could not be read, when it could not. Some interfaces
+    /// are unopenable by design -- a keyboard collection always is.
+    pub error: Option<String>,
+}
+
+/// One attached device and every interface it exposes, known to lumen or not.
+pub struct ProbedDevice {
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub product: String,
+    pub manufacturer: String,
+    pub interfaces: Vec<ProbedInterface>,
+}
+
+/// The permission error to raise when a device will not open, or `None` when
+/// Input Monitoring is granted and the cause is something else.
+fn permission_error(name: &str) -> Option<HidError> {
+    access::input_monitoring()
+        .fix()
+        .map(|fix| HidError::InputMonitoring {
+            name: name.to_string(),
+            fix,
+        })
 }
 
 impl Hid {
@@ -113,6 +154,7 @@ impl Hid {
         }
 
         let mut tried = Vec::new();
+        let mut opened_any = false;
         for (path, interface) in &paths {
             let cpath = match std::ffi::CString::new(path.as_str()) {
                 Ok(p) => p,
@@ -125,6 +167,7 @@ impl Hid {
                     continue;
                 }
             };
+            opened_any = true;
             let mut buf = vec![0u8; 4096];
             let len = match device.get_report_descriptor(&mut buf) {
                 Ok(n) => n,
@@ -152,11 +195,83 @@ impl Hid {
             }
         }
 
+        // Not one interface would open. If the grant is missing that is the
+        // whole story, and the list of `not permitted` failures below it is the
+        // symptom -- printing the symptom instead is what once made lumen look
+        // broken for an hour. When access is granted the list is the real
+        // answer: a keyboard collection refuses to open however it is asked.
+        if !opened_any && let Some(e) = permission_error(&spec.name) {
+            return Err(e);
+        }
+
         Err(HidError::NoControlInterface {
             name: spec.name.clone(),
             expected: spec.control_report_len,
             tried: tried.join("\n  "),
         })
+    }
+
+    /// Every attached HID device with the feature reports each interface
+    /// declares -- what `lumen probe` needs to describe hardware lumen has never
+    /// heard of. Devices are keyed by USB id, because one device shows up in the
+    /// HID list once per interface.
+    pub fn scan(&self) -> Result<Vec<ProbedDevice>, HidError> {
+        let mut devices: BTreeMap<(u16, u16), ProbedDevice> = BTreeMap::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+
+        for info in self.api.device_list() {
+            let path = info.path().to_string_lossy().into_owned();
+            // Several HID entries can share one interface path; read it once.
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            devices
+                .entry((info.vendor_id(), info.product_id()))
+                .or_insert_with(|| ProbedDevice {
+                    vendor_id: info.vendor_id(),
+                    product_id: info.product_id(),
+                    product: info.product_string().unwrap_or_default().to_string(),
+                    manufacturer: info.manufacturer_string().unwrap_or_default().to_string(),
+                    interfaces: Vec::new(),
+                })
+                .interfaces
+                .push(self.read_interface(&path, info.interface_number()));
+        }
+
+        if devices.is_empty() {
+            return Err(HidError::NoDevicesVisible);
+        }
+
+        let mut out: Vec<ProbedDevice> = devices.into_values().collect();
+        for device in &mut out {
+            device.interfaces.sort_by_key(|i| i.interface);
+        }
+        Ok(out)
+    }
+
+    /// Read one interface's feature reports, recording why not when it fails.
+    /// Probing never gives up on a device because one of its interfaces is shut.
+    fn read_interface(&self, path: &str, interface: i32) -> ProbedInterface {
+        let mut probed = ProbedInterface {
+            interface,
+            feature_reports: Vec::new(),
+            error: None,
+        };
+        let Ok(cpath) = std::ffi::CString::new(path) else {
+            probed.error = Some("device path is not usable".to_string());
+            return probed;
+        };
+        match self.api.open_path(&cpath) {
+            Err(e) => probed.error = Some(e.to_string()),
+            Ok(device) => {
+                let mut buf = vec![0u8; 4096];
+                match device.get_report_descriptor(&mut buf) {
+                    Ok(n) => probed.feature_reports = feature_reports(&buf[..n]),
+                    Err(e) => probed.error = Some(e.to_string()),
+                }
+            }
+        }
+        probed
     }
 }
 
