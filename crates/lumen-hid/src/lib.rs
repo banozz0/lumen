@@ -87,8 +87,8 @@ pub struct ProbedInterface {
     /// Feature reports this interface declares, as `(report id, data bytes)`.
     /// The data-byte count is what a registry entry's `control_report_len` holds.
     pub feature_reports: Vec<(u8, u32)>,
-    /// Why the interface could not be read, when it could not. Some interfaces
-    /// are unopenable by design -- a keyboard collection always is.
+    /// Why the interface could not be read, when it could not. Usually the
+    /// Input Monitoring grant rather than anything about the interface.
     pub error: Option<String>,
 }
 
@@ -216,8 +216,7 @@ impl Hid {
         // The test is "any interface refused", not "none opened": a device can
         // hand over a harmless interface and refuse the control one -- which is
         // exactly what the mouse does -- and that case needs the same answer.
-        // When access is granted this never fires and the list stands on its
-        // own: a keyboard collection refuses to open however it is asked.
+        // When access is granted this never fires and the list stands on its own.
         if refused_any && let Some(e) = permission_error(&spec.name, &tried) {
             return Err(e);
         }

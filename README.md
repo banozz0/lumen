@@ -75,9 +75,10 @@ Two more traps worth knowing:
   prompts again; only the System Settings toggle (or `tccutil reset ListenEvent
   <bundle-id>`) undoes it. That is why lumen tells you where the switch is
   instead of waiting for a prompt that will not come.
-- **`launchd` sees nothing.** A process started by a LaunchAgent gets an empty
-  HID device list no matter what is granted. Background lighting has to be a
-  LaunchServices-launched `.app`, not a LaunchAgent.
+- **`launchd` sees nothing.** A process started by a LaunchAgent got an empty
+  HID device list here whatever was granted — observed while building this, not
+  re-tested since. If you want background lighting, expect to need a
+  LaunchServices-launched `.app` rather than a LaunchAgent.
 
 If the device list is empty rather than unopenable, that is not the grant: either
 you are under `launchd`, or another process is holding the devices — close
