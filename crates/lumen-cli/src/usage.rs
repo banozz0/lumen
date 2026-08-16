@@ -40,8 +40,9 @@ pub fn log_since(cmd: &str, ok: bool, started: Instant) {
     write(cmd, ok, started.elapsed().as_millis());
 }
 
-/// `cmd` is always one of lumen's own subcommand names, never anything the user
-/// typed, so the line needs no JSON escaping.
+/// `cmd` is always one of lumen's own fixed names -- a subcommand, or `menu` for
+/// a menu session -- never anything the user typed, so the line needs no JSON
+/// escaping.
 fn write(cmd: &str, ok: bool, ms: u128) {
     let Some(path) = log_path() else { return };
     let line = line(&timestamp(SystemTime::now()), cmd, ok, ms);

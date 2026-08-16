@@ -347,8 +347,8 @@ fn probe(registry: &Registry, hid: &Hid) -> Result<()> {
     println!(
         "\nA device's control interface is the one declaring a big vendor feature report \
          -- 90 data bytes on a Razer, 263 on the HyperX. That byte count is the \
-         `control_report_len` its `[[device]]` block needs. Interfaces exposing a \
-         keyboard never open, whatever is granted; that is macOS, not a fault."
+         `control_report_len` its `[[device]]` block needs. An interface reported as \
+         unreadable is usually the Input Monitoring grant rather than the device."
     );
     Ok(())
 }

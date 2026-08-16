@@ -5,11 +5,17 @@
 //! * hidapi opens HID devices exclusively by default, which makes peripherals
 //!   that other processes hold unopenable. The `macos-shared-device` feature
 //!   switches to a shared open, and this crate depends on it.
-//! * One macOS HID "path" is one USB interface, and an interface exposing a
-//!   keyboard usage is protected: opening it fails with `kIOReturnNotPermitted`
-//!   no matter what. The control interface is therefore found by reading each
-//!   interface's report descriptor and picking the one that declares the feature
-//!   report the driver expects, rather than by hardcoding interface numbers.
+//! * One macOS HID "path" is one USB interface, and which interface carries a
+//!   device's control report is a per-device fact, not a convention -- the
+//!   keyboard verified here uses interface 2, the mouse interface 1. The control
+//!   interface is therefore found by reading each interface's report descriptor
+//!   and picking the one that declares the feature report the driver expects,
+//!   rather than by hardcoding a number.
+//! * Without the Input Monitoring grant, opening an interface fails with
+//!   `kIOReturnNotPermitted` -- but not uniformly: on the hardware here every
+//!   interface of the keyboard was refused while one of the mouse's three still
+//!   opened. So a refusal cannot be read as "this interface is special"; see
+//!   [`access`] for how the grant is checked instead of inferred.
 
 pub mod access;
 pub mod descriptor;
@@ -162,7 +168,7 @@ impl Hid {
         }
 
         let mut tried = Vec::new();
-        let mut opened_any = false;
+        let mut refused_any = false;
         for (path, interface) in &paths {
             let cpath = match std::ffi::CString::new(path.as_str()) {
                 Ok(p) => p,
@@ -172,10 +178,10 @@ impl Hid {
                 Ok(d) => d,
                 Err(e) => {
                     tried.push(format!("interface {interface}: cannot open ({e})"));
+                    refused_any = true;
                     continue;
                 }
             };
-            opened_any = true;
             let mut buf = vec![0u8; 4096];
             let len = match device.get_report_descriptor(&mut buf) {
                 Ok(n) => n,
@@ -203,12 +209,16 @@ impl Hid {
             }
         }
 
-        // Not one interface would open. If the grant is missing that is the
-        // whole story, and the list of `not permitted` failures below it is the
-        // symptom -- printing the symptom instead is what once made lumen look
-        // broken for an hour. When access is granted the list is the real
-        // answer: a keyboard collection refuses to open however it is asked.
-        if !opened_any && let Some(e) = permission_error(&spec.name, &tried) {
+        // An interface refused to open and the grant is missing: say that, and
+        // keep the refusals underneath it. Printing only the refusals is what
+        // once made lumen look broken for an hour.
+        //
+        // The test is "any interface refused", not "none opened": a device can
+        // hand over a harmless interface and refuse the control one -- which is
+        // exactly what the mouse does -- and that case needs the same answer.
+        // When access is granted this never fires and the list stands on its
+        // own: a keyboard collection refuses to open however it is asked.
+        if refused_any && let Some(e) = permission_error(&spec.name, &tried) {
             return Err(e);
         }
 

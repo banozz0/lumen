@@ -57,12 +57,17 @@ conclude the code is broken:
 ```
 $ lumen set keyboard --color purple
 Error: cannot open Razer Cynosa Lite: this terminal is not allowed to talk to HID devices.
-macOS charges the Input Monitoring grant to whatever launched the shell, not to the
-`lumen` binary, so it is your terminal that needs it.
-System Settings -> Privacy & Security -> Input Monitoring: your terminal is already in
-that list with its switch off. Turn it on -- macOS will not ask again by itself -- then
-run this again.
+macOS charges the Input Monitoring grant to whatever launched the shell, not to the `lumen` binary, so it is your terminal that needs it.
+System Settings -> Privacy & Security -> Input Monitoring: your terminal is already in that list with its switch off. Turn it on -- macOS will not ask again by itself -- then run this again.
+What each interface said:
+  interface 2: cannot open (hidapi error: hid_open_path: failed to open IOHIDDevice from mach entry: (0xE00002E2) (iokit/common) not permitted)
+  interface 1: cannot open (hidapi error: hid_open_path: failed to open IOHIDDevice from mach entry: (0xE00002E2) (iokit/common) not permitted)
+  interface 0: cannot open (hidapi error: hid_open_path: failed to open IOHIDDevice from mach entry: (0xE00002E2) (iokit/common) not permitted)
 ```
+
+The cause leads and the per-interface detail stays underneath it. Those three
+lines used to be the whole message, which is how an afternoon once went into
+debugging working code.
 
 Two more traps worth knowing:
 
@@ -144,8 +149,8 @@ Two consequences worth knowing:
 
 ## Adding your own device
 
-There are exactly two cases, and which one you are in depends on the vendor, not
-on the device.
+Two cases, and the vendor is what usually decides which one you are in — though
+not always, as the caveat below spells out.
 
 **Your device's vendor already has a driver here → one TOML block, no Rust.**
 That is the whole point of the registry.
@@ -168,22 +173,31 @@ is a smaller change than a new protocol, but it is not zero.
 
 ```
 $ lumen probe
-1532:023f  Razer Razer Cynosa Lite  -- in the registry as `razer-cynosa-lite`, driver `razer-extended-matrix`
-  interface 2: feature report 0x00, 90 data bytes
 03f0:0d8f  HP, Inc HyperX Pulsefire Core  -- in the registry as `hyperx-pulsefire-core`, driver `hyperx-pulsefire`
+  interface 0: no feature reports
   interface 1: feature report 0x07, 263 data bytes
+  interface 2: no feature reports
+1532:023f  Razer Razer Cynosa Lite  -- in the registry as `razer-cynosa-lite`, driver `razer-extended-matrix`
+  interface 0: no feature reports
+  interface 1: no feature reports
+  interface 2: feature report 0x00, 90 data bytes
 ```
 
 `probe` reports every attached HID device, in the registry or not, and one line
-per interface — the listing above keeps only the interesting line of each. You
-are looking for a big vendor-specific **feature report**: 90 data bytes on this
-keyboard, 263 on this mouse. That byte count is the `control_report_len` your
-entry needs, and reading it off the hardware beats guessing it.
+per interface. (Devices lumen does not drive are listed too; they are trimmed
+here.) You are looking for a big vendor-specific **feature report**: 90 data
+bytes on this keyboard, 263 on this mouse. That byte count is the
+`control_report_len` your entry needs, and reading it off the hardware beats
+guessing it.
 
-Interfaces reported as `unreadable` are normal. macOS refuses to hand over one
-that carries keystrokes however the grant is set, which is why lumen finds the
-control interface by reading report descriptors rather than by hardcoding an
-interface number.
+Note that the two devices keep their control report on *different* interfaces —
+1 and 2. That is the norm, and it is why lumen finds the control interface by
+reading report descriptors rather than by hardcoding a number.
+
+An interface reported as `unreadable` is almost always the Input Monitoring
+grant. Without it, all three of this keyboard's interfaces refuse to open, while
+the mouse still hands over one of its three — so partial output is not a clue
+about the hardware, it is a clue about the grant.
 
 ### 2. Write the block
 
@@ -267,8 +281,9 @@ open — it is the same unknown that makes its colour vanish on screen lock.
 
 A working tool that solves one problem for one person on one Mac. Two devices are
 in the registry; one of them is a promise. The interesting claim is that the
-third device costs a TOML block, and that claim is honest right up to the point
-where the vendor is new.
+third device can cost a TOML block and nothing else — true when it speaks a
+protocol already here at the same report length, and honestly documented where
+it is not.
 
 MIT licensed. Solo project — agents wrote the code — and no support is promised:
 issues and PRs may sit unanswered. Fork it freely.

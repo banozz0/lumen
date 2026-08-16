@@ -124,7 +124,9 @@ fn pick_color() -> Option<Rgb> {
             Choice::Item(i) if i < palette.len() => return Some(palette[i].1),
             Choice::Item(_) => {
                 let typed = ask("\nHex value, e.g. #ff0080 (0 = back) > ")?;
-                if typed == "0" {
+                // A leaf with no default: nothing typed is not an answer, so it
+                // goes back to the list rather than failing to parse "".
+                if typed.is_empty() || typed == "0" {
                     continue;
                 }
                 match typed.parse::<Rgb>() {
@@ -166,39 +168,49 @@ fn apply(registry: &Registry, hid: &Hid, target: &str, action: Action, hold: boo
     outcome.is_ok()
 }
 
-/// Offer to keep re-sending, but only for a device that needs it -- and say what
-/// that costs, because it runs until Ctrl-C.
-fn hold_wanted(registry: &Registry, hid: &Hid, target: &str) -> bool {
+/// Whether to keep re-sending, asked only of a device that needs it -- and with
+/// what that costs on screen, because holding runs until Ctrl-C. `None` is back:
+/// sending must be something the user chose, never what falls out of `0` or of
+/// the input ending.
+fn hold_choice(registry: &Registry, hid: &Hid, target: &str) -> Option<bool> {
     let present = hid.present(registry.all()).unwrap_or_default();
     let volatile = registry
         .resolve(target, &present)
         .iter()
         .any(|spec| !spec.holds_colour);
     if !volatile {
-        return false;
+        return Some(false);
     }
-    matches!(
-        choose(
-            "This device drops the colour the moment lumen stops sending it.",
-            &["Hold it lit until I press Ctrl-C".to_string()],
-            "Just send it once",
-        ),
-        Choice::Item(_)
-    )
+    match choose(
+        "This device drops the colour the moment lumen stops sending it.",
+        &[
+            "Hold it lit until I press Ctrl-C".to_string(),
+            "Send it once anyway".to_string(),
+        ],
+        "Back",
+    ) {
+        Choice::Item(0) => Some(true),
+        Choice::Item(_) => Some(false),
+        Choice::Back => None,
+    }
 }
 
 /// Device, then colour. `0` at the colour list steps back to the device list
 /// rather than out of the flow: back is always one level, everywhere.
 /// Returns whether anything was actually sent.
 fn colour_flow(registry: &Registry, hid: &Hid) -> bool {
-    loop {
+    'device: loop {
         let Some(target) = pick_target(registry, hid) else {
             return false;
         };
-        let Some(rgb) = pick_color() else { continue };
-        let hold = hold_wanted(registry, hid, &target);
-        apply(registry, hid, &target, Action::Color(rgb), hold);
-        return true;
+        loop {
+            let Some(rgb) = pick_color() else { continue 'device };
+            let Some(hold) = hold_choice(registry, hid, &target) else {
+                continue;
+            };
+            apply(registry, hid, &target, Action::Color(rgb), hold);
+            return true;
+        }
     }
 }
 
